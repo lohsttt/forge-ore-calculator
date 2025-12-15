@@ -1,6 +1,6 @@
 # ⛏️ Forge Ore Calculator (completely vibe-coded, just needed this tool)
 
-**Forge Ore Calculator** is a lightweight client-side utility mod for Minecraft (Fabric 1.21). It is designed for Tycoon/Economy servers that feature "Forge" mechanics where players must input specific ores to get a multiplier.
+**Forge Ore Calculator** is a lightweight client-side utility mod for Minecraft (Fabric =<1.21.5). It is designed for Tycoon/Economy servers that feature "Forge" mechanics where players must input specific ores to get a multiplier.
 
 Instead of doing the math in your head or guessing which stacks to use, this mod scans your inventory and calculates the **mathematically perfect loadout** to maximize your returns.
 
@@ -24,7 +24,7 @@ Instead of doing the math in your head or guessing which stacks to use, this mod
 ## 🚀 Installation
 
 1.  **Download** the latest release `.jar` file.
-2.  Ensure you have **[Fabric Loader](https://fabricmc.net/)** and **[Fabric API](https://modrinth.com/mod/fabric-api)** installed for Minecraft 1.21.
+2.  Ensure you have **[Fabric Loader](https://fabricmc.net/)** and **[Fabric API](https://modrinth.com/mod/fabric-api)** installed for Minecraft 1.21.5 or over.
 3.  Place the `.jar` file into your `mods` folder:
     * **Windows:** `%appdata%/.minecraft/mods`
     * **Feather Client:** Open Feather -> Mods -> "Add Own Mod" -> Drag file in.
@@ -48,7 +48,7 @@ If you want to edit the code yourself:
 
 ```bash
 # 1. Clone the repository
-git clone [https://github.com/YOUR_USERNAME/forge-ore-calculator.git](https://github.com/YOUR_USERNAME/forge-ore-calculator.git)
+git clone [https://github.com/lohsttt/forge-ore-calculator.git](https://github.com/lohsttt/forge-ore-calculator.git)
 
 # 2. Navigate to the folder
 cd forge-ore-calculator
