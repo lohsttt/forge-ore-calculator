@@ -6,6 +6,9 @@ import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.item.ItemStack;
+import net.minecraft.scoreboard.Scoreboard;
+import net.minecraft.scoreboard.ScoreboardDisplaySlot;
+import net.minecraft.scoreboard.ScoreboardObjective;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.text.Text;
@@ -15,147 +18,188 @@ import java.util.*;
 
 public class ForgeOreCalculatorClient implements ClientModInitializer {
 
-	private boolean isForgeOpen = false;
-	private List<StackEntry> topStacks = new ArrayList<>();
-	private double totalMultiplier = 0.0;
-	private boolean spacePressed = false;
+    // --- SETTINGS ---
+    // 1. TRANSPARENCY: 0xB0 is ~70% opacity. 
+    // (Previously 0xD0/80%. Lower number = More transparent)
+    private static final int BACKGROUND_COLOR = 0xB0000000; 
+    // ----------------
 
-	@Override
-	public void onInitializeClient() {
-		System.out.println("FORGE CALCULATOR (FINAL V2) LOADED!");
+    private boolean isForgeOpen = false;
+    private List<StackEntry> topStacks = new ArrayList<>();
+    private double totalMultiplier = 0.0;
+    private boolean spacePressed = false;
+    private int emptyTicks = 0; 
 
-		// 1. LOGIC LOOP
-		ClientTickEvents.END_CLIENT_TICK.register(client -> {
-			if (client.player == null || client.currentScreen == null) {
-				isForgeOpen = false;
-				return;
-			}
+    @Override
+    public void onInitializeClient() {
+        System.out.println("FORGE CALCULATOR (SCOREBOARD LOCKED) LOADED!");
 
-			if (client.currentScreen instanceof HandledScreen<?> screen) {
-				String cleanTitle = screen.getTitle().getString().toLowerCase().replaceAll("[^a-z0-9]", "");
+        // 1. LOGIC LOOP
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            if (client.player == null || client.currentScreen == null) {
+                isForgeOpen = false;
+                emptyTicks = 0;
+                return;
+            }
 
-				if (cleanTitle.contains("forge")) {
-					isForgeOpen = true;
-					calculate(screen.getScreenHandler());
+            // --- SERVER CHECK (SCOREBOARD METHOD) ---
+            // If the scoreboard does not say "AFKABLE", we assume we are on the wrong server.
+            if (!isOnAfkableServer(client)) {
+                isForgeOpen = false;
+                return;
+            }
 
-					// Spacebar Backup (Updated to match new Range format)
-					if (GLFW.glfwGetKey(client.getWindow().getHandle(), GLFW.GLFW_KEY_SPACE) == GLFW.GLFW_PRESS) {
-						if (!spacePressed) {
-							String range = String.format("%.2fx - %.2fx", totalMultiplier / 2.0, totalMultiplier);
-							client.player.sendMessage(Text.literal("§6[ForgeCalc] Range: §a" + range), false);
-							spacePressed = true;
-						}
-					} else {
-						spacePressed = false;
-					}
+            if (client.currentScreen instanceof HandledScreen<?> screen) {
+                String cleanTitle = screen.getTitle().getString().toLowerCase().replaceAll("[^a-z0-9]", "");
 
-				} else {
-					isForgeOpen = false;
-				}
-			} else {
-				isForgeOpen = false;
-			}
-		});
+                if (cleanTitle.contains("forge")) {
+                    isForgeOpen = true;
+                    calculate(screen.getScreenHandler());
 
-		// 2. RENDER LOOP
-		ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
-			if (screen instanceof HandledScreen) {
-				ScreenEvents.afterRender(screen).register((screen1, drawContext, mouseX, mouseY, tickDelta) -> {
-					if (!isForgeOpen) return;
+                    // Auto-Hide Logic
+                    if (topStacks.isEmpty()) {
+                        emptyTicks++;
+                    } else {
+                        emptyTicks = 0;
+                    }
 
-					// Draw at Top Left (5, 5)
-					int startX = 5;
-					int startY = 5;
+                    // Spacebar Backup
+                    if (GLFW.glfwGetKey(client.getWindow().getHandle(), GLFW.GLFW_KEY_SPACE) == GLFW.GLFW_PRESS) {
+                        if (!spacePressed) {
+                             String range = String.format("%.2fx - %.2fx", totalMultiplier / 2.0, totalMultiplier);
+                             client.player.sendMessage(Text.literal("§6[ForgeCalc] Range: §a" + range), false);
+                             spacePressed = true;
+                        }
+                    } else {
+                        spacePressed = false;
+                    }
 
-					// Background Box (Darker and Solid)
-					int boxHeight = 20 + (topStacks.size() * 20) + 20;
-					// Slightly wider box (180) to fit the new extra text
-					drawContext.fill(startX - 2, startY - 2, startX + 180, startY + boxHeight, 0xFF000000);
+                } else {
+                    isForgeOpen = false;
+                    emptyTicks = 0;
+                }
+            } else {
+                isForgeOpen = false;
+                emptyTicks = 0;
+            }
+        });
 
-					// Header (Updated Title)
-					drawContext.drawTextWithShadow(client.textRenderer, Text.literal("§6§lBEST COMBINATION"), startX + 5, startY + 2, 0xFFFFFFFF);
-					startY += 15;
+        // 2. RENDER LOOP
+        ScreenEvents.AFTER_INIT.register((client, screen, scaledWidth, scaledHeight) -> {
+            if (screen instanceof HandledScreen) {
+                ScreenEvents.afterRender(screen).register((screen1, drawContext, mouseX, mouseY, tickDelta) -> {
+                    if (!isForgeOpen) return;
 
-					if (topStacks.isEmpty()) {
-						drawContext.drawTextWithShadow(client.textRenderer, Text.literal("§7Scanning..."), startX + 5, startY, 0xFFFFFFFF);
-					} else {
-						int slotNum = 1;
-						for (StackEntry entry : topStacks) {
+                    // If empty for >0.5s, draw nothing
+                    if (topStacks.isEmpty() && emptyTicks > 10) {
+                        return;
+                    }
 
-							// A. DRAW ITEM ICON
-							if (entry.sampleStack != null) {
-								drawContext.drawItem(entry.sampleStack, startX + 2, startY);
-							}
+                    int startX = 5;
+                    int startY = 5;
 
-							// B. DRAW TEXT (Updated Format: xAmount = Value)
-							// Example: #1: Obsidian x20 = 600.00x
-							String text = String.format("§e#%d: §f%s x%d §7= §a%.2fx", slotNum, entry.name, entry.amount, entry.stackValue);
-							drawContext.drawTextWithShadow(client.textRenderer, Text.literal(text), startX + 22, startY + 4, 0xFFFFFFFF);
+                    int listSize = topStacks.isEmpty() ? 1 : topStacks.size();
+                    int boxHeight = 20 + (listSize * 20) + 20;
+                    
+                    // DRAW BOX (Using the new lighter semi-transparent color)
+                    drawContext.fill(startX - 2, startY - 2, startX + 180, startY + boxHeight, BACKGROUND_COLOR); 
 
-							startY += 20;
-							slotNum++;
-						}
-					}
+                    // Header
+                    drawContext.drawTextWithShadow(client.textRenderer, Text.literal("§6§lBEST COMBINATION"), startX + 5, startY + 2, 0xFFFFFFFF);
+                    startY += 15;
 
-					// Total Range (Half - Full)
-					startY += 5;
-					String rangeText = String.format("§aTotal: %.2fx - %.2fx", totalMultiplier / 2.0, totalMultiplier);
-					drawContext.drawTextWithShadow(client.textRenderer, Text.literal(rangeText), startX + 5, startY, 0xFFFFFFFF);
-				});
-			}
-		});
-	}
+                    if (topStacks.isEmpty()) {
+                        drawContext.drawTextWithShadow(client.textRenderer, Text.literal("§7Scanning..."), startX + 5, startY, 0xFFFFFFFF);
+                    } else {
+                        int slotNum = 1;
+                        for (StackEntry entry : topStacks) {
+                            if (entry.sampleStack != null) {
+                                drawContext.drawItem(entry.sampleStack, startX + 2, startY);
+                            }
+                            String text = String.format("§e#%d: §f%s x%d §7= §a%.2fx", slotNum, entry.name, entry.amount, entry.stackValue);
+                            drawContext.drawTextWithShadow(client.textRenderer, Text.literal(text), startX + 22, startY + 4, 0xFFFFFFFF);
+                            startY += 20; 
+                            slotNum++;
+                        }
+                    }
+                    
+                    startY += 5;
+                    String rangeText = String.format("§aTotal: %.2fx - %.2fx", totalMultiplier / 2.0, totalMultiplier);
+                    drawContext.drawTextWithShadow(client.textRenderer, Text.literal(rangeText), startX + 5, startY, 0xFFFFFFFF);
+                });
+            }
+        });
+    }
 
-	private void calculate(ScreenHandler handler) {
-		Map<OreData, Integer> totalCounts = new HashMap<>();
-		Map<OreData, ItemStack> iconCache = new HashMap<>();
+    /**
+     * Checks the Sidebar Scoreboard to see if we are on the "Afkable" server.
+     */
+    private boolean isOnAfkableServer(MinecraftClient client) {
+        if (client.world == null) return false;
+        
+        Scoreboard scoreboard = client.world.getScoreboard();
+        if (scoreboard == null) return false;
 
-		for (Slot slot : handler.slots) {
-			if (slot.hasStack()) {
-				ItemStack stack = slot.getStack();
-				String name = stack.getName().getString();
-				OreData ore = OreData.find(name);
-				if (ore != null) {
-					totalCounts.put(ore, totalCounts.getOrDefault(ore, 0) + stack.getCount());
-					iconCache.putIfAbsent(ore, stack);
-				}
-			}
-		}
+        // Get the objective in the SIDEBAR slot
+        ScoreboardObjective objective = scoreboard.getObjectiveForSlot(ScoreboardDisplaySlot.SIDEBAR);
+        
+        if (objective == null) return false;
 
-		List<StackEntry> allPossibleStacks = new ArrayList<>();
-		for (Map.Entry<OreData, Integer> entry : totalCounts.entrySet()) {
-			OreData ore = entry.getKey();
-			int remainingAmount = entry.getValue();
-			ItemStack sample = iconCache.get(ore);
+        // Check if the title contains "AFKABLE" (Case insensitive)
+        String title = objective.getDisplayName().getString().toLowerCase();
+        return title.contains("afkable");
+    }
 
-			while (remainingAmount > 0) {
-				int stackSize = Math.min(64, remainingAmount);
-				double stackValue = stackSize * ore.multiplier;
-				allPossibleStacks.add(new StackEntry(ore.displayName, stackSize, stackValue, sample));
-				remainingAmount -= stackSize;
-			}
-		}
+    private void calculate(ScreenHandler handler) {
+        Map<OreData, Integer> totalCounts = new HashMap<>();
+        Map<OreData, ItemStack> iconCache = new HashMap<>();
 
-		allPossibleStacks.sort((a, b) -> Double.compare(b.stackValue, a.stackValue));
+        for (Slot slot : handler.slots) {
+            if (slot.hasStack()) {
+                ItemStack stack = slot.getStack();
+                String name = stack.getName().getString();
+                OreData ore = OreData.find(name);
+                if (ore != null) {
+                    totalCounts.put(ore, totalCounts.getOrDefault(ore, 0) + stack.getCount());
+                    iconCache.putIfAbsent(ore, stack);
+                }
+            }
+        }
 
-		this.topStacks = allPossibleStacks.stream()
-				.limit(5)
-				.toList();
+        List<StackEntry> allPossibleStacks = new ArrayList<>();
+        for (Map.Entry<OreData, Integer> entry : totalCounts.entrySet()) {
+            OreData ore = entry.getKey();
+            int remainingAmount = entry.getValue();
+            ItemStack sample = iconCache.get(ore);
 
-		this.totalMultiplier = topStacks.stream().mapToDouble(r -> r.stackValue).sum();
-	}
+            while (remainingAmount > 0) {
+                int stackSize = Math.min(64, remainingAmount);
+                double stackValue = stackSize * ore.multiplier;
+                allPossibleStacks.add(new StackEntry(ore.displayName, stackSize, stackValue, sample));
+                remainingAmount -= stackSize;
+            }
+        }
 
-	private static class StackEntry {
-		String name;
-		int amount;
-		double stackValue;
-		ItemStack sampleStack;
+        allPossibleStacks.sort((a, b) -> Double.compare(b.stackValue, a.stackValue));
 
-		public StackEntry(String name, int amount, double stackValue, ItemStack sampleStack) {
-			this.name = name;
-			this.amount = amount;
-			this.stackValue = stackValue;
-			this.sampleStack = sampleStack;
-		}
-	}
+        this.topStacks = allPossibleStacks.stream()
+                .limit(5)
+                .toList();
+
+        this.totalMultiplier = topStacks.stream().mapToDouble(r -> r.stackValue).sum();
+    }
+
+    private static class StackEntry {
+        String name;
+        int amount;
+        double stackValue;
+        ItemStack sampleStack;
+
+        public StackEntry(String name, int amount, double stackValue, ItemStack sampleStack) {
+            this.name = name;
+            this.amount = amount;
+            this.stackValue = stackValue;
+            this.sampleStack = sampleStack;
+        }
+    }
 }
