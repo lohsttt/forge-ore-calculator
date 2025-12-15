@@ -6,6 +6,9 @@ import net.fabricmc.fabric.api.client.screen.v1.ScreenEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.item.ItemStack;
+import net.minecraft.scoreboard.Scoreboard;
+import net.minecraft.scoreboard.ScoreboardDisplaySlot;
+import net.minecraft.scoreboard.ScoreboardObjective;
 import net.minecraft.screen.ScreenHandler;
 import net.minecraft.screen.slot.Slot;
 import net.minecraft.text.Text;
@@ -15,18 +18,28 @@ import java.util.*;
 
 public class ForgeOreCalculatorClient implements ClientModInitializer {
 
+	// 0xB0 = ~70% Opacity
+	private static final int BACKGROUND_COLOR = 0xB0000000;
+
 	private boolean isForgeOpen = false;
 	private List<StackEntry> topStacks = new ArrayList<>();
 	private double totalMultiplier = 0.0;
 	private boolean spacePressed = false;
+	private int emptyTicks = 0;
 
 	@Override
 	public void onInitializeClient() {
-		System.out.println("FORGE CALCULATOR (FINAL V2) LOADED!");
+		System.out.println("FORGE CALCULATOR (1.21.8 COMPATIBLE) LOADED!");
 
 		// 1. LOGIC LOOP
 		ClientTickEvents.END_CLIENT_TICK.register(client -> {
 			if (client.player == null || client.currentScreen == null) {
+				isForgeOpen = false;
+				emptyTicks = 0;
+				return;
+			}
+
+			if (!isOnAfkableServer(client)) {
 				isForgeOpen = false;
 				return;
 			}
@@ -38,7 +51,12 @@ public class ForgeOreCalculatorClient implements ClientModInitializer {
 					isForgeOpen = true;
 					calculate(screen.getScreenHandler());
 
-					// Spacebar Backup (Updated to match new Range format)
+					if (topStacks.isEmpty()) {
+						emptyTicks++;
+					} else {
+						emptyTicks = 0;
+					}
+
 					if (GLFW.glfwGetKey(client.getWindow().getHandle(), GLFW.GLFW_KEY_SPACE) == GLFW.GLFW_PRESS) {
 						if (!spacePressed) {
 							String range = String.format("%.2fx - %.2fx", totalMultiplier / 2.0, totalMultiplier);
@@ -48,12 +66,13 @@ public class ForgeOreCalculatorClient implements ClientModInitializer {
 					} else {
 						spacePressed = false;
 					}
-
 				} else {
 					isForgeOpen = false;
+					emptyTicks = 0;
 				}
 			} else {
 				isForgeOpen = false;
+				emptyTicks = 0;
 			}
 		});
 
@@ -63,47 +82,51 @@ public class ForgeOreCalculatorClient implements ClientModInitializer {
 				ScreenEvents.afterRender(screen).register((screen1, drawContext, mouseX, mouseY, tickDelta) -> {
 					if (!isForgeOpen) return;
 
-					// Draw at Top Left (5, 5)
+					if (topStacks.isEmpty() && emptyTicks > 10) return;
+
 					int startX = 5;
 					int startY = 5;
+					int listSize = topStacks.isEmpty() ? 1 : topStacks.size();
+					int boxHeight = 20 + (listSize * 20) + 20;
 
-					// Background Box (Darker and Solid)
-					int boxHeight = 20 + (topStacks.size() * 20) + 20;
-					// Slightly wider box (180) to fit the new extra text
-					drawContext.fill(startX - 2, startY - 2, startX + 180, startY + boxHeight, 0xFF000000);
+					drawContext.fill(startX - 2, startY - 2, startX + 180, startY + boxHeight, BACKGROUND_COLOR);
 
-					// Header (Updated Title)
-					drawContext.drawTextWithShadow(client.textRenderer, Text.literal("§6§lBEST COMBINATION"), startX + 5, startY + 2, 0xFFFFFFFF);
+					// FIX: Use drawText(..., true) instead of drawTextWithShadow
+					drawContext.drawText(client.textRenderer, Text.literal("§6§lBEST COMBINATION"), startX + 5, startY + 2, 0xFFFFFFFF, true);
 					startY += 15;
 
 					if (topStacks.isEmpty()) {
-						drawContext.drawTextWithShadow(client.textRenderer, Text.literal("§7Scanning..."), startX + 5, startY, 0xFFFFFFFF);
+						drawContext.drawText(client.textRenderer, Text.literal("§7Scanning..."), startX + 5, startY, 0xFFFFFFFF, true);
 					} else {
 						int slotNum = 1;
 						for (StackEntry entry : topStacks) {
-
-							// A. DRAW ITEM ICON
 							if (entry.sampleStack != null) {
 								drawContext.drawItem(entry.sampleStack, startX + 2, startY);
 							}
-
-							// B. DRAW TEXT (Updated Format: xAmount = Value)
-							// Example: #1: Obsidian x20 = 600.00x
 							String text = String.format("§e#%d: §f%s x%d §7= §a%.2fx", slotNum, entry.name, entry.amount, entry.stackValue);
-							drawContext.drawTextWithShadow(client.textRenderer, Text.literal(text), startX + 22, startY + 4, 0xFFFFFFFF);
-
+							// FIX: Use drawText(..., true)
+							drawContext.drawText(client.textRenderer, Text.literal(text), startX + 22, startY + 4, 0xFFFFFFFF, true);
 							startY += 20;
 							slotNum++;
 						}
 					}
 
-					// Total Range (Half - Full)
 					startY += 5;
 					String rangeText = String.format("§aTotal: %.2fx - %.2fx", totalMultiplier / 2.0, totalMultiplier);
-					drawContext.drawTextWithShadow(client.textRenderer, Text.literal(rangeText), startX + 5, startY, 0xFFFFFFFF);
+					drawContext.drawText(client.textRenderer, Text.literal(rangeText), startX + 5, startY, 0xFFFFFFFF, true);
 				});
 			}
 		});
+	}
+
+	private boolean isOnAfkableServer(MinecraftClient client) {
+		if (client.world == null) return false;
+		Scoreboard scoreboard = client.world.getScoreboard();
+		if (scoreboard == null) return false;
+		ScoreboardObjective objective = scoreboard.getObjectiveForSlot(ScoreboardDisplaySlot.SIDEBAR);
+		if (objective == null) return false;
+		String title = objective.getDisplayName().getString().toLowerCase();
+		return title.contains("afkable");
 	}
 
 	private void calculate(ScreenHandler handler) {
@@ -137,11 +160,7 @@ public class ForgeOreCalculatorClient implements ClientModInitializer {
 		}
 
 		allPossibleStacks.sort((a, b) -> Double.compare(b.stackValue, a.stackValue));
-
-		this.topStacks = allPossibleStacks.stream()
-				.limit(5)
-				.toList();
-
+		this.topStacks = allPossibleStacks.stream().limit(5).toList();
 		this.totalMultiplier = topStacks.stream().mapToDouble(r -> r.stackValue).sum();
 	}
 
