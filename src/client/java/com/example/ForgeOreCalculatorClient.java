@@ -89,7 +89,7 @@ public class ForgeOreCalculatorClient implements ClientModInitializer {
 					int listSize = topStacks.isEmpty() ? 1 : topStacks.size();
 					int boxHeight = 20 + (listSize * 20) + 20;
 
-					drawContext.fill(startX - 2, startY - 2, startX + 180, startY + boxHeight, BACKGROUND_COLOR);
+					drawContext.fill(startX - 2, startY - 2, startX + 220, startY + boxHeight, BACKGROUND_COLOR);
 
 					// FIX: Use drawText(..., true) instead of drawTextWithShadow
 					drawContext.drawText(client.textRenderer, Text.literal("§6§lBEST COMBINATION"), startX + 5, startY + 2, 0xFFFFFFFF, true);
